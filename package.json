@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@github/webauthn-json": "^2.1.1",
     "@rhinestone/module-sdk": "^0.1.32",
     "next": "15.1.0",
     "permissionless": "^0.2.23",

@@ -10,12 +10,13 @@ import {
   encodeValidatorNonce,
   getAccount,
   getClient,
+  getWebAuthnValidator,
   getWebauthnValidatorMockSignature,
   installModule,
   MOCK_ATTESTER_ADDRESS,
   RHINESTONE_ATTESTER_ADDRESS,
 } from "@rhinestone/module-sdk";
-import { http } from "viem";
+import { Address, http } from "viem";
 import {
   ENTRY_POINT_VERSION,
   SAFE_VERSION,
@@ -27,6 +28,7 @@ import { toSafeSmartAccount } from "permissionless/accounts";
 import { baseSepolia } from "viem/chains";
 import { createPublicClient } from "viem";
 import {
+  createWebAuthnCredential,
   entryPoint07Address,
   getUserOperationHash,
   toWebAuthnAccount,
@@ -34,8 +36,17 @@ import {
 import { authenticatorId, publicKey, webauthn } from "@/app/modules/webauthn";
 import { getAccountNonce } from "permissionless/actions";
 import { socialRecovery } from "@/app/modules/socialRecovery";
+import { createHash } from "crypto";
+import { NextApiRequest, NextApiResponse } from "next";
 
-export async function GET() {
+export async function GET(req: NextApiRequest, res: NextApiResponse) {
+  const url = new URL(req.url as string); // Convert req.url to a URL object
+  const _publicKey = url.searchParams.get("publicKey") as Address;
+  const _credentialId = url.searchParams.get("credentialId");
+
+  if (!_publicKey) return res.status(500).send("No Public Key found");
+  if (!_credentialId) return res.status(500).send("No Credential ID found");
+
   const publicClient = createPublicClient({
     transport: http(),
     chain: baseSepolia,
@@ -71,19 +82,19 @@ export async function GET() {
     },
   }).extend(erc7579Actions());
 
-  const isRecoveryModuleInstalled = await smartAccountClient.isModuleInstalled(
-    socialRecovery
-  );
-  console.log(isRecoveryModuleInstalled);
-  const isWebAuthnInstalled = await smartAccountClient.isModuleInstalled(
-    webauthn
-  );
-  console.log(isWebAuthnInstalled);
+  const webauthn = getWebAuthnValidator({
+    pubKey: _publicKey,
+    authenticatorId: _credentialId,
+  });
 
   const opHash = await smartAccountClient.installModule(webauthn);
   await pimlicoClient.waitForUserOperationReceipt({
     hash: opHash,
   });
+
+  const isWebAuthnInstalled = await smartAccountClient.isModuleInstalled(
+    webauthn
+  );
 
   return Response.json({
     message: "Installed webauthn module in existing safe account",
