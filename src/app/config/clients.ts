@@ -9,12 +9,23 @@ import {
 } from "viem/account-abstraction";
 import { ENTRY_POINT_VERSION } from "./safe";
 
+const getCandideChainId = (chainId: number) => {
+  switch (chainId) {
+    case baseSepolia.id:
+      return "base-sepolia";
+    case sepolia.id:
+      return "sepolia";
+    default:
+      throw new Error("Unsupported chain");
+  }
+};
+
 // const publicClient = createPublicClient({
 //   transport: http(),
 //   chain: baseSepolia,
 // });
 
-const bundlerUrl = `https://api.pimlico.io/v2/${baseSepolia.id}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+const bundlerUrl = `https://api.pimlico.io/v2/${baseSepolia.id}/rpc?apikey=${process.env.NEXT_PUBLIC_PIMLICO_API_KEY}`;
 const pimlicoClient = createPimlicoClient({
   transport: http(bundlerUrl),
   entryPoint: {
@@ -23,10 +34,19 @@ const pimlicoClient = createPimlicoClient({
   },
 });
 
-const paymasterUrl = `https://api.pimlico.io/v2/${baseSepolia.id}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+const paymasterUrl = `https://api.pimlico.io/v2/${baseSepolia.id}/rpc?apikey=${process.env.NEXT_PUBLIC_PIMLICO_API_KEY}`;
 const paymasterClient = createPaymasterClient({
   transport: http(paymasterUrl),
 });
+
+const candidePaymasterUrl = `https://api.candide.dev/paymaster/v3/${getCandideChainId(
+  sepolia.id
+)}/${process.env.NEXT_PUBLIC_CANDIDE_API_KEY}`;
+const candideBundlerUrl = `https://api.candide.dev/bundler/v3/${getCandideChainId(
+  sepolia.id
+)}/${process.env.NEXT_PUBLIC_CANDIDE_API_KEY}`;
+const jsonRpcUrl = "https://1rpc.io/sepolia";
+const candideSponsorshipPolicyId = "d4924faaa8ebec13";
 
 // const smartAccountClient = createSmartAccountClient({
 //   account: safeAccount,
@@ -46,4 +66,8 @@ export {
   paymasterClient,
   // smartAccountClient,
   bundlerUrl,
+  candideBundlerUrl,
+  candidePaymasterUrl,
+  candideSponsorshipPolicyId,
+  jsonRpcUrl,
 };
