@@ -1,6 +1,6 @@
 import { createSmartAccountClient } from "permissionless";
 import { createPublicClient, http } from "viem";
-import { baseSepolia } from "viem/chains";
+import { sepolia, baseSepolia } from "viem/chains";
 import { createPimlicoClient } from "permissionless/clients/pimlico";
 import { erc7579Actions } from "permissionless/actions/erc7579";
 import {

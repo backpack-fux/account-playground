@@ -10,13 +10,15 @@ import {
   encodeValidatorNonce,
   getAccount,
   getClient,
+  getTrustAttestersAction,
   getWebAuthnValidator,
   getWebauthnValidatorMockSignature,
+  getWebauthnValidatorSignature,
   installModule,
   MOCK_ATTESTER_ADDRESS,
   RHINESTONE_ATTESTER_ADDRESS,
 } from "@rhinestone/module-sdk";
-import { Address, http } from "viem";
+import { Address, http, pad } from "viem";
 import {
   ENTRY_POINT_VERSION,
   SAFE_VERSION,
@@ -87,18 +89,65 @@ export async function GET(req: NextApiRequest, res: NextApiResponse) {
     authenticatorId: _credentialId,
   });
 
-  const opHash = await smartAccountClient.installModule(webauthn);
-  await pimlicoClient.waitForUserOperationReceipt({
-    hash: opHash,
-  });
-
   const isWebAuthnInstalled = await smartAccountClient.isModuleInstalled(
     webauthn
   );
 
+  let opHash1;
+  if (!isWebAuthnInstalled) {
+    opHash1 = await smartAccountClient.installModule(webauthn);
+    await pimlicoClient.waitForUserOperationReceipt({
+      hash: opHash1,
+    });
+  }
+
+  const nonce = await safeAccount.getNonce();
+
+  const action = getTrustAttestersAction({
+    threshold: 1,
+    attesters: [RHINESTONE_ATTESTER_ADDRESS, MOCK_ATTESTER_ADDRESS],
+  });
+
+  const calls = [
+    {
+      to: action.target,
+      data: action.callData,
+    },
+  ];
+
+  const userOperation = await smartAccountClient.prepareUserOperation({
+    account: safeAccount,
+    calls: calls,
+    nonce,
+    signature: getWebauthnValidatorMockSignature(),
+  });
+
+  const userOpHashToSign = getUserOperationHash({
+    chainId: baseSepolia.id,
+    entryPointAddress: entryPoint07Address,
+    entryPointVersion: ENTRY_POINT_VERSION,
+    userOperation,
+  });
+
+  await smartAccountClient.signMessage({
+    account: safeAccount,
+    message: userOpHashToSign,
+  });
+
+  // const userOpHash = await smartAccountClient.sendUserOperation({
+  //   account: safeAccount,
+  //   calls: calls,
+  //   nonce,
+  //   signature: getWebauthnValidatorMockSignature(),
+  // });
+
+  // const receipt = await pimlicoClient.waitForUserOperationReceipt({
+  //   hash: userOpHash,
+  // });
+
   return Response.json({
     message: "Installed webauthn module in existing safe account",
-    opHash,
+    opHash: opHash1,
     isWebAuthnInstalled,
   });
 }
