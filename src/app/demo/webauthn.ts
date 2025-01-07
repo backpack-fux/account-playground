@@ -203,6 +203,7 @@ export class WebAuthnCredentials {
   get({
     publicKey,
   }: CredentialRequestOptions): PublicKeyCredential<AuthenticatorAssertionResponse> {
+    console.log("publicKey in sdk", publicKey);
     const credential = publicKey.allowCredentials
       .flatMap(({ id }) =>
         this.#credentials.filter(
@@ -210,6 +211,7 @@ export class WebAuthnCredentials {
         )
       )
       .at(0);
+    console.log("credential in sdk", credential);
     if (credential === undefined) {
       throw new Error("credential not found");
     }
@@ -304,6 +306,7 @@ export function extractPublicKey(response: AuthenticatorAttestationResponse): {
   );
   const key: Map<number, unknown> = CBOR.decode(cosePublicKey);
   const bn = (bytes: Uint8Array) => BigInt(ethers.hexlify(bytes));
+  console.log("key in sdk", key);
   return {
     x: bn(key.get(-2) as Uint8Array),
     y: bn(key.get(-3) as Uint8Array),
