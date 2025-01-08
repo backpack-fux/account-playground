@@ -1,21 +1,21 @@
-interface AlertProps {
-  variant: "error" | "info" | "success";
-  children: React.ReactNode;
-  className?: string;
+interface AlertProps extends React.HTMLAttributes<HTMLDivElement> {
+  variant?: "error" | "success";
 }
 
 const variantStyles = {
-  error: "bg-red-100 border-red-400 text-red-700",
-  info: "bg-blue-100 border-blue-400 text-blue-700",
-  success: "bg-green-100 border-green-400 text-green-700",
+  error: "bg-red-50 text-red-700 border-red-200",
+  success: "bg-green-50 text-green-700 border-green-200",
 };
 
-export function Alert({ variant, children, className = "" }: AlertProps) {
+export function Alert({
+  variant = "error",
+  className = "",
+  ...props
+}: AlertProps) {
   return (
     <div
-      className={`${variantStyles[variant]} px-4 py-3 rounded border ${className}`}
-    >
-      {children}
-    </div>
+      className={`p-4 rounded-md border ${variantStyles[variant]} ${className}`}
+      {...props}
+    />
   );
 }

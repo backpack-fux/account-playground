@@ -11,6 +11,8 @@
   "dependencies": {
     "@github/webauthn-json": "^2.1.1",
     "@rhinestone/module-sdk": "^0.1.32",
+    "@simplewebauthn/browser": "^13.0.0",
+    "@simplewebauthn/server": "^13.0.0",
     "abstractionkit": "^0.2.9",
     "cbor": "^10.0.3",
     "next": "15.1.0",

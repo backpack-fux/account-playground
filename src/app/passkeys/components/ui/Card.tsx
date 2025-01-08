@@ -1,12 +1,10 @@
-interface CardProps {
-  children: React.ReactNode;
-  className?: string;
-}
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
 
-export function Card({ children, className = "" }: CardProps) {
+export function Card({ className = "", ...props }: CardProps) {
   return (
-    <div className={`bg-white shadow-md rounded-lg p-6 ${className}`}>
-      {children}
-    </div>
+    <div
+      className={`bg-white rounded-lg shadow-sm border border-gray-200 p-6 ${className}`}
+      {...props}
+    />
   );
 }
