@@ -1,55 +1,151 @@
+import { PublicKeyCoordinates } from "./types";
+
 /**
- * Sets an item in the local storage.
- * @param key - The key to set the item with.
- * @param value - The value to be stored. It will be converted to a string using JSON.stringify.
- * @template T - The type of the value being stored.
+ * Storage keys used in the application
  */
-export function setItem<T>(key: string, value: T) {
-  // to prevent silly mistakes with double stringifying
-  if (typeof value === "string") {
-    localStorage.setItem(key, value);
-  } else {
-    localStorage.setItem(
-      key,
-      JSON.stringify(value, (_key, value) =>
-        typeof value === "bigint" ? "0x" + value.toString(16) : value
-      )
+export const STORAGE_KEYS = {
+  PASSKEY: "passkey",
+  SAFE_ACCOUNT: "safe_account",
+} as const;
+
+/**
+ * Base storage interface for all stored items
+ */
+interface StorageItem {
+  version: number;
+  updatedAt: number;
+}
+
+/**
+ * Passkey storage format
+ */
+export interface PasskeyStorage extends StorageItem {
+  rawId: string;
+  pubkeyCoordinates: PublicKeyCoordinates;
+}
+
+/**
+ * Safe account storage format
+ */
+export interface SafeAccountStorage extends StorageItem {
+  owners: PublicKeyCoordinates[];
+  eip7212WebAuthnPrecompileVerifierForSharedSigner: string;
+}
+
+/**
+ * Type mapping for storage items
+ */
+export interface StorageTypes {
+  [STORAGE_KEYS.PASSKEY]: PasskeyStorage;
+  [STORAGE_KEYS.SAFE_ACCOUNT]: SafeAccountStorage;
+}
+
+/**
+ * Storage manager class with type safety and error handling
+ */
+class StorageManager {
+  private static instance: StorageManager;
+  private currentVersion = 1;
+
+  private constructor() {}
+
+  static getInstance(): StorageManager {
+    if (!StorageManager.instance) {
+      StorageManager.instance = new StorageManager();
+    }
+    return StorageManager.instance;
+  }
+
+  /**
+   * Sets an item in localStorage with versioning and timestamp
+   */
+  setItem<K extends keyof StorageTypes>(
+    key: K,
+    value: Omit<StorageTypes[K], keyof StorageItem>
+  ) {
+    try {
+      const item: StorageTypes[K] = {
+        ...(value as any),
+        version: this.currentVersion,
+        updatedAt: Date.now(),
+      };
+      localStorage.setItem(key, this.serialize(item));
+    } catch (error) {
+      console.error(`Error setting ${key} in localStorage:`, error);
+      throw new Error(`Failed to store ${key} in localStorage`);
+    }
+  }
+
+  /**
+   * Gets an item from localStorage with type checking
+   */
+  getItem<K extends keyof StorageTypes>(key: K): StorageTypes[K] | null {
+    try {
+      const item = localStorage.getItem(key);
+      if (!item) return null;
+
+      const parsed = this.deserialize<StorageTypes[K]>(item);
+
+      // Version check could be added here if needed
+      // if (parsed.version !== this.currentVersion) {
+      //   this.migrate(key, parsed);
+      // }
+
+      return parsed;
+    } catch (error) {
+      console.error(`Error getting ${key} from localStorage:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Removes an item from localStorage
+   */
+  removeItem(key: keyof StorageTypes): void {
+    try {
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.error(`Error removing ${key} from localStorage:`, error);
+    }
+  }
+
+  /**
+   * Clears all items from localStorage
+   */
+  clear(): void {
+    try {
+      localStorage.clear();
+    } catch (error) {
+      console.error("Error clearing localStorage:", error);
+    }
+  }
+
+  /**
+   * Serializes a value with BigInt support
+   */
+  private serialize(value: unknown): string {
+    return JSON.stringify(value, (_, value) =>
+      typeof value === "bigint" ? `bigint:${value.toString()}` : value
     );
   }
-}
 
-/**
- * Retrieves the value associated with the specified key from the local storage.
- *
- * @param key - The key of the item to retrieve.
- * @returns The value associated with the key, or null if the key does not exist.
- */
-export function getItem(key: string): string | null {
-  return localStorage.getItem(key);
-}
-
-/**
- * Retrieves and parses a JSON value from local storage.
- * @param key - The key to retrieve the value for.
- * @returns The parsed value, or null if the key doesn't exist or the value is invalid JSON.
- */
-export function getJsonItem<T>(key: string): T | null {
-  const item = localStorage.getItem(key);
-  if (!item) return null;
-
-  try {
-    return JSON.parse(item, (_key, value) => {
-      if (typeof value === "string" && value.startsWith("0x")) {
-        // Try to convert hex strings back to bigint
-        try {
-          return BigInt(value);
-        } catch {
-          return value;
-        }
+  /**
+   * Deserializes a value with BigInt support
+   */
+  private deserialize<T>(value: string): T {
+    return JSON.parse(value, (_, value) => {
+      if (typeof value === "string" && value.startsWith("bigint:")) {
+        return BigInt(value.slice(7));
       }
       return value;
-    }) as T;
-  } catch {
-    return null;
+    });
   }
+
+  // Migration logic could be added here if needed
+  // private migrate<K extends keyof StorageTypes>(key: K, value: StorageTypes[K]): void {
+  //   // Migration logic
+  // }
 }
+
+// Export singleton instance
+export const storage = StorageManager.getInstance();

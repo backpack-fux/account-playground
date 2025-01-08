@@ -1,7 +1,21 @@
 "use client";
 
-import { usePasskey } from "./hooks/usePasskey";
+import { usePasskey, SignMessageResult } from "./hooks/usePasskey";
 import { useSafeAccount } from "./hooks/useSafeAccount";
+import { useState } from "react";
+import { SafeAccountV0_3_0 as SafeAccount } from "abstractionkit";
+import { Alert } from "./components/ui/Alert";
+import { Card } from "./components/ui/Card";
+import {
+  PasskeySection,
+  SafeAccountSection,
+  SignMessageSection,
+  TransactionSection,
+} from "./components/sections";
+
+// Constants
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
+const DEFAULT_MESSAGE = "Hello World";
 
 export default function PasskeysDemo() {
   const {
@@ -9,6 +23,7 @@ export default function PasskeysDemo() {
     error: passkeyError,
     isLoading: isPasskeyLoading,
     createPasskey,
+    signMessage,
   } = usePasskey();
 
   const {
@@ -18,6 +33,9 @@ export default function PasskeysDemo() {
     createAccount,
     sendTransaction,
   } = useSafeAccount();
+
+  const [signResult, setSignResult] = useState<SignMessageResult | null>(null);
+  const [isValid, setIsValid] = useState<boolean | null>(null);
 
   const error = passkeyError || safeError;
   const isLoading = isPasskeyLoading || isSafeLoading;
@@ -32,75 +50,86 @@ export default function PasskeysDemo() {
     await sendTransaction(passkey);
   };
 
+  const handleSignMessage = async () => {
+    if (!passkey) return;
+    try {
+      const result = await signMessage(DEFAULT_MESSAGE);
+      setSignResult(result);
+
+      const isValid = await SafeAccount.verifyWebAuthnSignatureForMessageHash(
+        RPC_URL,
+        passkey.pubkeyCoordinates,
+        result.messageHash,
+        result.signature
+      );
+      setIsValid(isValid);
+    } catch (error) {
+      console.error("Error signing message:", error);
+    }
+  };
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Safe Passkeys Demo</h1>
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
+      <div className="container mx-auto px-4 py-12">
+        <div className="max-w-4xl mx-auto">
+          <header className="text-center mb-12">
+            <h1 className="text-5xl font-bold text-gray-900 mb-4">
+              Safe Passkeys Demo
+            </h1>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Create and manage your Safe Account with Passkeys - a more secure
+              and convenient way to manage your assets
+            </p>
+          </header>
 
-      <div className="space-y-4">
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-            {error}
+          <div className="space-y-8">
+            {error && (
+              <Alert variant="error" className="mb-8">
+                {error}
+              </Alert>
+            )}
+            {isLoading && (
+              <Alert variant="info" className="mb-8">
+                Loading...
+              </Alert>
+            )}
+
+            <Card className="transform transition-all duration-200 hover:shadow-lg">
+              <PasskeySection
+                passkey={passkey}
+                isLoading={isLoading}
+                onCreatePasskey={createPasskey}
+              />
+            </Card>
+
+            <Card className="transform transition-all duration-200 hover:shadow-lg">
+              <SafeAccountSection
+                safeAccount={safeAccount}
+                isLoading={isLoading}
+                canCreate={!!passkey}
+                onCreate={handleCreateSafeAccount}
+              />
+            </Card>
+
+            <Card className="transform transition-all duration-200 hover:shadow-lg">
+              <TransactionSection
+                isLoading={isLoading}
+                canSend={!!safeAccount && !!passkey}
+                onSend={handleSendTransaction}
+              />
+            </Card>
+
+            <Card className="transform transition-all duration-200 hover:shadow-lg">
+              <SignMessageSection
+                signResult={signResult}
+                isLoading={isLoading}
+                canSign={!!passkey}
+                onSign={handleSignMessage}
+                isValid={isValid}
+                message={DEFAULT_MESSAGE}
+              />
+            </Card>
           </div>
-        )}
-
-        {isLoading && (
-          <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded">
-            Loading...
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold">Step 1: Create Passkey</h2>
-          {passkey ? (
-            <div className="bg-green-100 p-4 rounded">
-              <p>✅ Passkey created</p>
-              <p className="text-sm break-all">
-                Public Key X: {passkey.pubkeyCoordinates.x.toString()}
-              </p>
-              <p className="text-sm break-all">
-                Public Key Y: {passkey.pubkeyCoordinates.y.toString()}
-              </p>
-            </div>
-          ) : (
-            <button
-              onClick={createPasskey}
-              disabled={isLoading}
-              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
-            >
-              Create Passkey
-            </button>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold">Step 2: Create Safe Account</h2>
-          {safeAccount ? (
-            <div className="bg-green-100 p-4 rounded">
-              <p>✅ Safe Account created</p>
-              <p className="text-sm break-all">
-                Address: {safeAccount.accountAddress}
-              </p>
-            </div>
-          ) : (
-            <button
-              onClick={handleCreateSafeAccount}
-              disabled={!passkey || isLoading}
-              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
-            >
-              Create Safe Account
-            </button>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold">Step 3: Send Transaction</h2>
-          <button
-            onClick={handleSendTransaction}
-            disabled={!safeAccount || !passkey || isLoading}
-            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
-          >
-            Send Test Transaction
-          </button>
         </div>
       </div>
     </div>
