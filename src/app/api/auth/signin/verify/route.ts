@@ -81,8 +81,15 @@ export async function POST(request: Request) {
         },
       });
 
-      // Example: Set an auth cookie
+      // Set auth cookies
       response.cookies.set("auth", "true", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+      });
+
+      response.cookies.set("username", username, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "strict",

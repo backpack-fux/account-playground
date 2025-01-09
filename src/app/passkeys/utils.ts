@@ -1,12 +1,43 @@
 import { Buffer } from "buffer";
-import { toHex, fromHex } from "viem";
+import { toHex } from "viem";
+import { extractPasskeyData } from "@safe-global/protocol-kit";
 import {
   PasskeyCredentialWithPubkeyCoordinates,
   PasskeyLocalStorageFormat,
   PublicKeyCoordinates,
 } from "./types";
+import CBOR from "cbor";
 
 const WEBAUTHN_TIMEOUT = 60000;
+
+/**
+ * Convert base64url to base64
+ * Replace `-` with `+` and `_` with `/` and add padding
+ */
+function base64UrlToBase64(str: string): string {
+  let output = str.replace(/-/g, "+").replace(/_/g, "/");
+  switch (output.length % 4) {
+    case 0:
+      break;
+    case 2:
+      output += "==";
+      break;
+    case 3:
+      output += "=";
+      break;
+    default:
+      throw new Error("Invalid base64url string");
+  }
+  return output;
+}
+
+/**
+ * Decode a base64url string to a Buffer
+ */
+export function base64UrlDecode(str: string): Buffer {
+  const base64 = base64UrlToBase64(str);
+  return Buffer.from(base64, "base64");
+}
 
 interface WebAuthnCreationOptions {
   rpId?: string;
@@ -56,36 +87,15 @@ export async function createPasskey(
       throw new Error("Failed to generate passkey");
     }
 
-    const response = passkeyCredential.response as any;
-    if (!response.getPublicKey) {
-      throw new Error("Invalid passkey response format");
-    }
-
-    // Import the public key to get XY coordinates
-    const key = await crypto.subtle.importKey(
-      "spki",
-      response.getPublicKey(),
-      {
-        name: "ECDSA",
-        namedCurve: "P-256",
-        hash: { name: "SHA-256" },
-      },
-      true,
-      ["verify"]
-    );
-
-    // Export the public key and extract coordinates
-    const exportedKey = await crypto.subtle.exportKey("jwk", key);
-    if (!exportedKey.x || !exportedKey.y) {
-      throw new Error("Failed to extract public key coordinates");
-    }
+    // Extract passkey data using Safe Protocol Kit
+    const { coordinates } = await extractPasskeyData(passkeyCredential);
 
     // Create the final passkey object with coordinates
     return {
       ...passkeyCredential,
       pubkeyCoordinates: {
-        x: BigInt(`0x${Buffer.from(exportedKey.x, "base64").toString("hex")}`),
-        y: BigInt(`0x${Buffer.from(exportedKey.y, "base64").toString("hex")}`),
+        x: BigInt(coordinates.x),
+        y: BigInt(coordinates.y),
       },
     } as PasskeyCredentialWithPubkeyCoordinates;
   } catch (error) {
@@ -102,90 +112,29 @@ export async function createPasskey(
 export function toLocalStorageFormat(
   passkey: PasskeyCredentialWithPubkeyCoordinates
 ): PasskeyLocalStorageFormat {
-  return {
-    rawId: toHex(new Uint8Array(passkey.rawId)),
-    pubkeyCoordinates: passkey.pubkeyCoordinates,
-  };
-}
-
-/**
- * Extracts the signature into R and S values from the authenticator response.
- * @see https://datatracker.ietf.org/doc/html/rfc3279#section-2.2.3
- * @see https://en.wikipedia.org/wiki/X.690#BER_encoding
- */
-export function extractSignature(
-  signature: ArrayBuffer | Uint8Array
-): [bigint, bigint] {
   try {
-    const sig = signature instanceof Uint8Array ? signature.buffer : signature;
-    const view = new DataView(sig);
-
-    // Validate sequence header
-    if (view.getUint8(0) !== 0x30 || view.getUint8(1) !== view.byteLength - 2) {
-      throw new Error("Invalid signature sequence header");
+    if (!passkey.rawId) {
+      throw new Error("Invalid passkey: missing rawId");
+    }
+    if (!passkey.pubkeyCoordinates) {
+      throw new Error("Invalid passkey: missing pubkeyCoordinates");
+    }
+    if (
+      typeof passkey.pubkeyCoordinates.x !== "bigint" ||
+      typeof passkey.pubkeyCoordinates.y !== "bigint"
+    ) {
+      throw new Error("Invalid passkey: invalid pubkeyCoordinates");
     }
 
-    // Read r and s values
-    const readInt = (offset: number): [bigint, number] => {
-      if (view.getUint8(offset) !== 0x02) {
-        throw new Error("Invalid integer tag");
-      }
-
-      const len = view.getUint8(offset + 1);
-      const start = offset + 2;
-      const end = start + len;
-      const value = BigInt(
-        toHex(new Uint8Array(view.buffer.slice(start, end)))
-      );
-
-      if (
-        value >=
-        BigInt(
-          "0x10000000000000000000000000000000000000000000000000000000000000000"
-        )
-      ) {
-        throw new Error("Integer value too large");
-      }
-
-      return [value, end];
+    return {
+      rawId: toHex(new Uint8Array(passkey.rawId)),
+      pubkeyCoordinates: passkey.pubkeyCoordinates,
     };
-
-    const [r, sOffset] = readInt(2);
-    const [s] = readInt(sOffset);
-
-    return [r, s];
   } catch (error) {
-    console.error("Error extracting signature:", error);
+    console.error("Error converting passkey to localStorage format:", error);
     throw error instanceof Error
       ? error
-      : new Error("Failed to extract signature components");
-  }
-}
-
-/**
- * Extracts additional client data JSON fields
- * @see https://w3c.github.io/webauthn/#clientdatajson-serialization
- */
-export function extractClientDataFields(
-  response: AuthenticatorAssertionResponse
-): string {
-  try {
-    const clientDataJSON = new TextDecoder().decode(response.clientDataJSON);
-    const match = clientDataJSON.match(
-      /^\{"type":"webauthn.get","challenge":"[A-Za-z0-9\-_]{43}",(.*)\}$/
-    );
-
-    if (!match) {
-      throw new Error("Invalid client data JSON format");
-    }
-
-    const [, fields] = match;
-    return toHex(new TextEncoder().encode(fields));
-  } catch (error) {
-    console.error("Error extracting client data fields:", error);
-    throw error instanceof Error
-      ? error
-      : new Error("Failed to extract client data fields");
+      : new Error("Failed to convert passkey to localStorage format");
   }
 }
 
@@ -195,13 +144,155 @@ export function extractClientDataFields(
 export function isLocalStoragePasskey(
   value: unknown
 ): value is PasskeyLocalStorageFormat {
-  if (!value || typeof value !== "object") return false;
+  try {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
 
-  const candidate = value as Partial<PasskeyLocalStorageFormat>;
-  return (
-    typeof candidate.rawId === "string" &&
-    !!candidate.pubkeyCoordinates &&
-    typeof candidate.pubkeyCoordinates.x === "bigint" &&
-    typeof candidate.pubkeyCoordinates.y === "bigint"
+    const candidate = value as Partial<PasskeyLocalStorageFormat>;
+
+    // Check rawId
+    if (typeof candidate.rawId !== "string") {
+      return false;
+    }
+    if (!candidate.rawId.startsWith("0x")) {
+      return false;
+    }
+
+    // Check pubkeyCoordinates
+    if (!candidate.pubkeyCoordinates) {
+      return false;
+    }
+    if (typeof candidate.pubkeyCoordinates !== "object") {
+      return false;
+    }
+    if (typeof candidate.pubkeyCoordinates.x !== "bigint") {
+      return false;
+    }
+    if (typeof candidate.pubkeyCoordinates.y !== "bigint") {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error checking localStorage passkey format:", error);
+    return false;
+  }
+}
+
+/**
+ * Compute the additional client data JSON fields. This is the fields other than `type` and
+ * `challenge` (including `origin` and any other additional client data fields that may be
+ * added by the authenticator).
+ *
+ * See <https://w3c.github.io/webauthn/#clientdatajson-serialization>
+ */
+export function extractClientDataFields(
+  response: AuthenticatorAssertionResponse
+): string {
+  const clientDataJSON = new TextDecoder("utf-8").decode(
+    response.clientDataJSON
   );
+  const match = clientDataJSON.match(
+    /^\{"type":"webauthn.get","challenge":"[A-Za-z0-9\-_]{43}",(.*)\}$/
+  );
+
+  if (!match) {
+    throw new Error("challenge not found in client data JSON");
+  }
+
+  const [, fields] = match;
+  return toHex(new TextEncoder().encode(fields));
+}
+
+/**
+ * Extracts the signature into R and S values from a DER-encoded signature.
+ */
+export function extractSignature(signature: ArrayBuffer): [bigint, bigint] {
+  const check = (x: boolean) => {
+    if (!x) {
+      throw new Error("invalid signature encoding");
+    }
+  };
+
+  // Decode the DER signature. Note that we assume that all lengths fit into 8-bit integers,
+  // which is true for the kinds of signatures we are decoding but generally false.
+  const view = new DataView(signature);
+
+  // check that the sequence header is valid
+  check(view.getUint8(0) === 0x30);
+  check(view.getUint8(1) === view.byteLength - 2);
+
+  // read r and s
+  const readInt = (offset: number) => {
+    check(view.getUint8(offset) === 0x02);
+    const len = view.getUint8(offset + 1);
+    const start = offset + 2;
+    const end = start + len;
+    const n = BigInt(toHex(new Uint8Array(view.buffer.slice(start, end))));
+    return [n, end] as const;
+  };
+  const [r, sOffset] = readInt(2);
+  const [s] = readInt(sOffset);
+
+  return [r, s];
+}
+
+/**
+ * Extract the x and y coordinates of the public key from a created public key credential.
+ * Inspired from <https://webauthn.guide/#registration>.
+ */
+export function extractPublicKey(response: {
+  attestationObject: string | ArrayBuffer;
+}): PublicKeyCoordinates {
+  try {
+    let attestationObject;
+    if (response.attestationObject instanceof ArrayBuffer) {
+      attestationObject = CBOR.decode(Buffer.from(response.attestationObject));
+    } else {
+      // Convert base64url to regular base64 before decoding
+      const base64 = base64UrlToBase64(response.attestationObject);
+      attestationObject = CBOR.decode(Buffer.from(base64, "base64"));
+    }
+
+    console.log("Decoded attestation object:", attestationObject);
+
+    // Get authenticator data from attestation
+    const authData = new Uint8Array(attestationObject.authData);
+
+    // Skip rpIdHash (32 bytes) and flags (1 byte)
+    let offset = 33;
+
+    // Skip signCount (4 bytes)
+    offset += 4;
+
+    // Skip aaguid (16 bytes)
+    offset += 16;
+
+    // Get credential ID length (2 bytes)
+    const credentialIdLength = (authData[offset] << 8) | authData[offset + 1];
+    offset += 2;
+
+    // Skip credential ID
+    offset += credentialIdLength;
+
+    // The rest is the CBOR-encoded public key
+    const cosePublicKey = authData.slice(offset);
+    console.log("COSE public key bytes:", cosePublicKey);
+
+    const key = CBOR.decode(cosePublicKey);
+    console.log("Decoded COSE key:", key);
+
+    if (!key.get(-2) || !key.get(-3)) {
+      throw new Error("Missing x or y coordinate in public key");
+    }
+
+    const x = BigInt(toHex(key.get(-2)));
+    const y = BigInt(toHex(key.get(-3)));
+
+    return { x, y };
+  } catch (error) {
+    console.error("Error in extractPublicKey:", error);
+    throw error;
+  }
 }

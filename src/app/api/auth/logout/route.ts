@@ -16,13 +16,21 @@ export async function POST() {
     // Create a response that will clear the auth cookie
     const response = NextResponse.json({ success: true });
 
-    // Clear the auth cookie
+    // Clear the auth cookies
     response.cookies.set("auth", "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/",
       expires: new Date(0), // Setting expires to past date effectively deletes the cookie
+    });
+
+    response.cookies.set("username", "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/",
+      expires: new Date(0),
     });
 
     return response;

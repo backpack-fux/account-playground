@@ -5,16 +5,20 @@ import { PasskeysDashboard } from "./components/PasskeysDashboard";
 export default async function PasskeysPage() {
   const cookieStore = await cookies();
   const isAuthenticated = cookieStore.get("auth")?.value === "true";
+  const username = cookieStore.get("username")?.value;
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !username) {
     redirect("/passkeys/auth");
   }
 
   // Get the current user from our in-memory store
   // @ts-ignore (global type)
   const users = global.users as Map<string, any>;
-  const allUsers = Array.from(users.values());
-  const authenticatedUsers = allUsers.filter((user) => user.devices.length > 0);
+  const currentUser = users.get(username);
 
-  return <PasskeysDashboard users={authenticatedUsers} />;
+  if (!currentUser) {
+    redirect("/passkeys/auth");
+  }
+
+  return <PasskeysDashboard users={[currentUser]} />;
 }

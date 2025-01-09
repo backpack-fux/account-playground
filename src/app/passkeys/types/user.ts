@@ -8,6 +8,14 @@ export interface User {
   devices: WebAuthnDevice[];
   createdAt: Date;
   updatedAt: Date;
+  safeAccount?: {
+    address: string;
+    owners: Array<{
+      x: bigint;
+      y: bigint;
+    }>;
+    eip7212WebAuthnPrecompileVerifierForSharedSigner: string;
+  };
 }
 
 export interface SignUpBody {

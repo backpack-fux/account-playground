@@ -1,14 +1,10 @@
 import { useState, useEffect } from "react";
-import { toBytes, hashMessage } from "viem";
+import { toBytes, hashMessage, fromHex } from "viem";
 import { SafeAccountV0_3_0 as SafeAccount } from "abstractionkit";
 import { PasskeyLocalStorageFormat } from "../types";
-import {
-  createPasskey,
-  toLocalStorageFormat,
-  extractSignature,
-  extractClientDataFields,
-} from "../utils";
-import { storage, STORAGE_KEYS, PasskeyStorage } from "../storage";
+import { createPasskey, toLocalStorageFormat } from "../utils";
+import { storage, STORAGE_KEYS } from "../storage";
+import { extractSignature, extractClientDataFields } from "../utils";
 
 const DEFAULT_MESSAGE = "Hello World";
 
@@ -99,7 +95,7 @@ export function usePasskey() {
           allowCredentials: [
             {
               type: "public-key",
-              id: Buffer.from(passkey.rawId, "hex"),
+              id: fromHex(`0x${passkey.rawId}`, "bytes"),
             },
           ],
           userVerification: "required",
@@ -112,20 +108,15 @@ export function usePasskey() {
 
       const response = assertion.response as AuthenticatorAssertionResponse;
 
-      // Extract signature data
-      const webauthnSignatureData = {
+      // Create the WebAuthn signature in the format Safe expects
+      const webauthnSignature = SafeAccount.createWebAuthnSignature({
         authenticatorData: response.authenticatorData,
         clientDataFields: extractClientDataFields(response),
         rs: extractSignature(response.signature),
-      };
-
-      // Create the WebAuthn signature in the format Safe expects
-      const signature = SafeAccount.createWebAuthnSignature(
-        webauthnSignatureData
-      );
+      });
 
       return {
-        signature,
+        signature: webauthnSignature,
         messageHash,
       };
     } catch (error) {
