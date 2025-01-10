@@ -1,12 +1,6 @@
-import { generateAuthenticationOptions } from "@simplewebauthn/server";
 import { NextResponse } from "next/server";
-import { rpID } from "@/app/passkeys/config/webauthn";
+import { PasskeyService } from "@/app/passkeys/services/passkey";
 import type { SignInBody } from "@/app/passkeys/types/user";
-
-declare global {
-  var users: Map<string, any>;
-}
-global.users = global.users || new Map<string, any>();
 
 export async function POST(request: Request) {
   try {
@@ -15,33 +9,7 @@ export async function POST(request: Request) {
 
     console.log("Signin attempt for user:", username);
 
-    const user = global.users.get(username);
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    console.log("User devices:", user.devices);
-
-    // Generate authentication options
-    const options = await generateAuthenticationOptions({
-      rpID,
-      allowCredentials: user.devices.map((device: any) => ({
-        id: device.credentialID,
-        type: "public-key",
-        transports: device.transports || [
-          "internal",
-          "hybrid",
-          "usb",
-          "ble",
-          "nfc",
-        ],
-      })),
-      userVerification: "preferred",
-    });
-
-    // Store challenge
-    user.currentChallenge = options.challenge;
-    global.users.set(username, user);
+    const options = await PasskeyService.initiateAuthentication(username);
 
     console.log("Authentication options generated:", {
       ...options,
@@ -55,7 +23,10 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Error in signin:", error);
     return NextResponse.json(
-      { error: "Failed to initiate signin" },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to initiate signin",
+      },
       { status: 500 }
     );
   }

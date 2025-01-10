@@ -1,21 +1,37 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Add paths that don't require authentication
-const publicPaths = ["/passkeys/auth"];
-
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const isAuthenticated = request.cookies.get("auth")?.value === "true";
+  const username = request.cookies.get("username")?.value;
 
-  // Check if the path is public
-  if (publicPaths.some((path) => pathname.startsWith(path))) {
+  // Protected routes that require authentication
+  const protectedPaths = ["/passkeys"];
+  const isProtectedPath = protectedPaths.some(
+    (path) =>
+      request.nextUrl.pathname === path ||
+      (request.nextUrl.pathname.startsWith(path + "/") &&
+        !request.nextUrl.pathname.startsWith("/passkeys/auth"))
+  );
+
+  // Auth pages that should redirect if already authenticated
+  const authPaths = ["/passkeys/auth"];
+  const isAuthPath = authPaths.some(
+    (path) => request.nextUrl.pathname === path
+  );
+
+  // Skip middleware for API routes
+  if (request.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
-  // Check if user is authenticated
-  const isAuthenticated = request.cookies.has("auth");
-  if (!isAuthenticated && !pathname.startsWith("/api/")) {
-    // Redirect to auth page if not authenticated
+  // Redirect authenticated users away from auth pages
+  if (isAuthPath && isAuthenticated && username) {
+    return NextResponse.redirect(new URL("/passkeys", request.url));
+  }
+
+  // Redirect unauthenticated users to auth page
+  if (isProtectedPath && (!isAuthenticated || !username)) {
     return NextResponse.redirect(new URL("/passkeys/auth", request.url));
   }
 
@@ -23,12 +39,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    // Match all request paths except for the ones starting with:
-    // - api (API routes)
-    // - _next/static (static files)
-    // - _next/image (image optimization files)
-    // - favicon.ico (favicon file)
-    "/((?!api|_next/static|_next/image|favicon.ico).*)",
-  ],
+  matcher: ["/passkeys", "/passkeys/auth", "/passkeys/:path*"],
 };

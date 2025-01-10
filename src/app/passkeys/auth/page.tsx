@@ -1,133 +1,66 @@
 "use client";
 
 import { useState } from "react";
-import { startRegistration } from "@simplewebauthn/browser";
-import { startAuthentication } from "@simplewebauthn/browser";
+import { useRouter } from "next/navigation";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Alert } from "../components/ui/Alert";
+import { FormInput } from "../components/ui/FormInput";
+import { AuthService } from "../services/auth";
+import { useForm } from "../hooks/useForm";
+
+interface AuthFormValues {
+  username: string;
+  email: string;
+}
+
+const initialValues: AuthFormValues = {
+  username: "",
+  email: "",
+};
 
 export default function AuthPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<"signup" | "signin">("signin");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const {
+    values,
+    error,
+    success,
+    isLoading,
+    handleChange,
+    handleSubmit,
+    setSuccess,
+    reset,
+  } = useForm<AuthFormValues>({
+    initialValues,
+    onSubmit: async (values) => {
+      const result =
+        mode === "signup"
+          ? await AuthService.register(values.username, values.email)
+          : await AuthService.login(values.username);
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    setIsLoading(true);
-
-    try {
-      // 1. Get registration options from server
-      const optionsRes = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email }),
-      });
-
-      if (!optionsRes.ok) {
-        const error = await optionsRes.json();
-        throw new Error(error.error || "Failed to start registration");
-      }
-
-      // 2. Start registration with browser
-      const regOptions = await optionsRes.json();
-      console.log("Registration options:", regOptions);
-      const regResult = await startRegistration({
-        optionsJSON: regOptions,
-      });
-      console.log("Registration result:", regResult);
-
-      // 3. Verify registration with server
-      const verifyRes = await fetch("/api/auth/signup/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          response: regResult,
-        }),
-      });
-
-      const verification = await verifyRes.json();
-
-      if (verification.verified) {
-        setSuccess("Registration successful! You can now sign in.");
-        setMode("signin");
+      if (result.verified) {
+        if (mode === "signup") {
+          setSuccess("Registration successful! You can now sign in.");
+          setMode("signin");
+        } else {
+          setSuccess("Authentication successful!");
+          // Wait a moment to show the success message
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          router.push("/passkeys");
+        }
       } else {
-        throw new Error("Registration failed");
+        throw new Error(
+          result.error ||
+            `${mode === "signup" ? "Registration" : "Authentication"} failed`
+        );
       }
-    } catch (err) {
-      console.error("Registration error:", err);
-      setError(err instanceof Error ? err.message : "Registration failed");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+  });
 
-  const handleSignin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    setIsLoading(true);
-
-    try {
-      // 1. Get authentication options from server
-      const optionsRes = await fetch("/api/auth/signin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username }),
-      });
-
-      if (!optionsRes.ok) {
-        const error = await optionsRes.json();
-        throw new Error(error.error || "Failed to start authentication");
-      }
-
-      // 2. Start authentication with browser
-      const authOptions = await optionsRes.json();
-      console.log("Authentication options:", authOptions);
-      const authResult = await startAuthentication({
-        optionsJSON: authOptions,
-      });
-      console.log("Authentication result:", authResult);
-
-      // 3. Verify authentication with server
-      const verifyRes = await fetch("/api/auth/signin/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          response: authResult,
-        }),
-      });
-
-      if (!verifyRes.ok) {
-        const error = await verifyRes.json();
-        throw new Error(error.error || "Failed to verify authentication");
-      }
-
-      const verification = await verifyRes.json();
-      console.log("Verification result:", verification);
-
-      if (verification.verified) {
-        setSuccess("Authentication successful!");
-        // Wait a moment to show the success message
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        // Redirect to home page after successful login
-        window.location.href = "/passkeys";
-      } else {
-        throw new Error("Authentication failed");
-      }
-    } catch (err) {
-      console.error("Authentication error:", err);
-      setError(err instanceof Error ? err.message : "Authentication failed");
-    } finally {
-      setIsLoading(false);
-    }
+  const toggleMode = () => {
+    setMode((prev) => (prev === "signup" ? "signin" : "signup"));
+    reset();
   };
 
   return (
@@ -158,44 +91,24 @@ export default function AuthPage() {
           )}
 
           <Card>
-            <form
-              onSubmit={mode === "signup" ? handleSignup : handleSignin}
-              className="space-y-4"
-            >
-              <div>
-                <label
-                  htmlFor="username"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Username
-                </label>
-                <input
-                  type="text"
-                  id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <FormInput
+                label="Username"
+                name="username"
+                value={values.username}
+                onChange={handleChange}
+                required
+              />
 
               {mode === "signup" && (
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    id="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    required
-                  />
-                </div>
+                <FormInput
+                  label="Email"
+                  type="email"
+                  name="email"
+                  value={values.email}
+                  onChange={handleChange}
+                  required
+                />
               )}
 
               <Button type="submit" isLoading={isLoading} className="w-full">
@@ -205,7 +118,7 @@ export default function AuthPage() {
 
             <div className="mt-4 text-center">
               <button
-                onClick={() => setMode(mode === "signup" ? "signin" : "signup")}
+                onClick={toggleMode}
                 className="text-sm text-blue-600 hover:text-blue-500"
               >
                 {mode === "signup"

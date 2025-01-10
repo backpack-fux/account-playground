@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@github/webauthn-json": "^2.1.1",
+    "@prisma/client": "^6.2.1",
     "@rhinestone/module-sdk": "^0.1.32",
     "@safe-global/protocol-kit": "^5.1.1",
     "@simplewebauthn/browser": "^13.0.0",
@@ -21,6 +22,7 @@
     "permissionless": "^0.2.23",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sonner": "^1.7.1",
     "viem": "^2.21.55"
   },
   "devDependencies": {

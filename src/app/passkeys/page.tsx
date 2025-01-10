@@ -1,24 +1,43 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect, useState } from "react";
 import { PasskeysDashboard } from "./components/PasskeysDashboard";
+import type { User } from "./types/user";
 
-export default async function PasskeysPage() {
-  const cookieStore = await cookies();
-  const isAuthenticated = cookieStore.get("auth")?.value === "true";
-  const username = cookieStore.get("username")?.value;
+export default function PasskeysPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  if (!isAuthenticated || !username) {
-    redirect("/passkeys/auth");
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const response = await fetch("/api/auth/me");
+        if (!response.ok) {
+          throw new Error("Failed to fetch user data");
+        }
+        const data = await response.json();
+        setUser(data.user);
+      } catch (error) {
+        console.error("Error fetching user:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchUser();
+  }, []);
+
+  if (loading) {
+    return <div>Loading...</div>;
   }
 
-  // Get the current user from our in-memory store
-  // @ts-ignore (global type)
-  const users = global.users as Map<string, any>;
-  const currentUser = users.get(username);
-
-  if (!currentUser) {
-    redirect("/passkeys/auth");
+  if (!user) {
+    return null;
   }
 
-  return <PasskeysDashboard users={[currentUser]} />;
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <PasskeysDashboard user={user} />
+    </div>
+  );
 }

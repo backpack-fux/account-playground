@@ -1,4 +1,4 @@
-import { WebAuthnDevice } from "./webauthn";
+import type { WebAuthnDevice } from "./webauthn";
 
 export interface User {
   id: string;
@@ -11,8 +11,8 @@ export interface User {
   safeAccount?: {
     address: string;
     owners: Array<{
-      x: bigint;
-      y: bigint;
+      x: string;
+      y: string;
     }>;
     eip7212WebAuthnPrecompileVerifierForSharedSigner: string;
   };

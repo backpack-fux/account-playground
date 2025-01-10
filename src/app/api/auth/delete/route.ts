@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { PasskeyService } from "@/app/passkeys/services/passkey";
 
 export async function POST(request: Request) {
   try {
@@ -11,9 +12,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // @ts-ignore (global type)
-    const users = global.users as Map<string, any>;
-    users.delete(username);
+    await PasskeyService.deletePasskey(username);
 
     // Clear auth cookies
     const response = NextResponse.json({ success: true });
@@ -36,7 +35,10 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Error deleting passkey:", error);
     return NextResponse.json(
-      { error: "Failed to delete passkey" },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to delete passkey",
+      },
       { status: 500 }
     );
   }

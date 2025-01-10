@@ -1,12 +1,12 @@
 import { Buffer } from "buffer";
-import { toHex } from "viem";
+import { bytesToString, maxUint256, stringToBytes, toHex } from "viem";
 import { extractPasskeyData } from "@safe-global/protocol-kit";
 import {
   PasskeyCredentialWithPubkeyCoordinates,
   PasskeyLocalStorageFormat,
   PublicKeyCoordinates,
 } from "./types";
-import CBOR from "cbor";
+import * as CBOR from "cbor";
 
 const WEBAUTHN_TIMEOUT = 60000;
 
@@ -43,6 +43,11 @@ interface WebAuthnCreationOptions {
   rpId?: string;
   rpName?: string;
   timeout?: number;
+  user?: {
+    id: string;
+    name: string;
+    displayName: string;
+  };
 }
 
 /**
@@ -58,6 +63,7 @@ export async function createPasskey(
     rpId = window.location.hostname,
     rpName = "Safe Wallet",
     timeout = WEBAUTHN_TIMEOUT,
+    user,
   } = options;
 
   try {
@@ -73,11 +79,17 @@ export async function createPasskey(
         ],
         challenge: crypto.getRandomValues(new Uint8Array(32)),
         rp: { id: rpId, name: rpName },
-        user: {
-          displayName: "Safe Owner",
-          id: crypto.getRandomValues(new Uint8Array(32)),
-          name: "safe-owner",
-        },
+        user: user
+          ? {
+              id: new TextEncoder().encode(user.id),
+              name: user.name,
+              displayName: user.displayName,
+            }
+          : {
+              displayName: "Safe Owner",
+              id: crypto.getRandomValues(new Uint8Array(32)),
+              name: "safe-owner",
+            },
         timeout,
         attestation: "none",
       },
@@ -190,9 +202,7 @@ export function isLocalStoragePasskey(
 export function extractClientDataFields(
   response: AuthenticatorAssertionResponse
 ): string {
-  const clientDataJSON = new TextDecoder("utf-8").decode(
-    response.clientDataJSON
-  );
+  const clientDataJSON = bytesToString(new Uint8Array(response.clientDataJSON));
   const match = clientDataJSON.match(
     /^\{"type":"webauthn.get","challenge":"[A-Za-z0-9\-_]{43}",(.*)\}$/
   );
@@ -202,13 +212,23 @@ export function extractClientDataFields(
   }
 
   const [, fields] = match;
-  return toHex(new TextEncoder().encode(fields));
+  return toHex(stringToBytes(fields));
 }
 
 /**
+/**
  * Extracts the signature into R and S values from a DER-encoded signature.
  */
-export function extractSignature(signature: ArrayBuffer): [bigint, bigint] {
+export function extractSignature(
+  signature: ArrayBuffer | Uint8Array
+): [bigint, bigint] {
+  let sig: ArrayBuffer;
+  if (signature instanceof Uint8Array) {
+    sig = signature.buffer;
+  } else {
+    sig = signature;
+  }
+
   const check = (x: boolean) => {
     if (!x) {
       throw new Error("invalid signature encoding");
@@ -216,8 +236,9 @@ export function extractSignature(signature: ArrayBuffer): [bigint, bigint] {
   };
 
   // Decode the DER signature. Note that we assume that all lengths fit into 8-bit integers,
-  // which is true for the kinds of signatures we are decoding but generally false.
-  const view = new DataView(signature);
+  // which is true for the kinds of signatures we are decoding but generally false. I.e. this
+  // code should not be used in any serious application.
+  const view = new DataView(sig);
 
   // check that the sequence header is valid
   check(view.getUint8(0) === 0x30);
@@ -230,6 +251,7 @@ export function extractSignature(signature: ArrayBuffer): [bigint, bigint] {
     const start = offset + 2;
     const end = start + len;
     const n = BigInt(toHex(new Uint8Array(view.buffer.slice(start, end))));
+    check(n < maxUint256);
     return [n, end] as const;
   };
   const [r, sOffset] = readInt(2);
@@ -293,6 +315,25 @@ export function extractPublicKey(response: {
     return { x, y };
   } catch (error) {
     console.error("Error in extractPublicKey:", error);
+    throw error;
+  }
+}
+
+export function extractPublicKeyFromBytes(publicKeyBytes: Buffer) {
+  try {
+    // Decode COSE key
+    const key = CBOR.decode(publicKeyBytes);
+
+    if (!key.get(-2) || !key.get(-3)) {
+      throw new Error("Missing x or y coordinate in public key");
+    }
+
+    const x = BigInt(toHex(key.get(-2)));
+    const y = BigInt(toHex(key.get(-3)));
+
+    return { x, y };
+  } catch (error) {
+    console.error("Error extracting public key coordinates:", error);
     throw error;
   }
 }

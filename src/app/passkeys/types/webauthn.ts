@@ -13,9 +13,15 @@ export interface WebAuthnUser {
 
 export interface WebAuthnDevice {
   credentialID: string;
-  credentialPublicKey: string;
-  counter: number;
-  transports?: AuthenticatorTransportFuture[];
+  transports: string[];
+  publicKey: string;
+}
+
+export interface WebAuthnCredential {
+  id: string;
+  rawId: string;
+  response: any;
+  type: string;
 }
 
 export interface RegistrationResponseBody {

@@ -14,10 +14,14 @@ import {
   extractClientDataFields,
   base64UrlDecode,
 } from "../utils";
+import type { User } from "../types/user";
+import { WebAuthnService } from "../services/webauthn";
+import { AddPasskeyOwnerButton } from "./AddPasskeyOwnerButton";
+import { ListOwnersButton } from "./ListOwnersButton";
 
 const BUNDLER_URL = process.env.NEXT_PUBLIC_BUNDLER_URL || "";
 const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL || "";
-const SPONSORSHIP_POLICY_ID = "d4924faaa8ebec13";
+const SPONSORSHIP_POLICY_ID = process.env.NEXT_PUBLIC_SPONSORSHIP_POLICY_ID || "";
 const CHAIN_ID = BigInt(process.env.NEXT_PUBLIC_CHAIN_ID || "11155111");
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
 
@@ -116,11 +120,11 @@ function DeleteButton() {
 }
 
 function SignMessageButton({ user }: { user: User }) {
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState("Hello World");
+  const [message, setMessage] = useState("Hello, World!");
   const [signature, setSignature] = useState<string | null>(null);
   const [isValid, setIsValid] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   async function handleSignMessage() {
     setIsLoading(true);
@@ -129,7 +133,6 @@ function SignMessageButton({ user }: { user: User }) {
     setIsValid(null);
 
     try {
-      // Get the first device's credential ID
       const device = user.devices[0];
       if (!device) {
         throw new Error("No device found");
@@ -139,58 +142,15 @@ function SignMessageButton({ user }: { user: User }) {
         throw new Error("No Safe account found");
       }
 
-      // Create message hash
-      const messageHash = hashMessage(message);
-
-      // Request WebAuthn signature
-      const assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge: toBytes(messageHash),
-          allowCredentials: [
-            {
-              type: "public-key",
-              id: base64UrlDecode(device.credentialID),
-            },
-          ],
-          userVerification: "required",
-        },
-      });
-
-      if (!assertion || !("response" in assertion)) {
-        throw new Error("Failed to get WebAuthn assertion");
-      }
-
-      const assertionResponse =
-        assertion.response as AuthenticatorAssertionResponse;
-
-      // Create signature data
-      const webauthnSignatureData = {
-        authenticatorData: assertionResponse.authenticatorData,
-        clientDataFields: extractClientDataFields(assertionResponse),
-        rs: extractSignature(assertionResponse.signature),
-      };
-
-      // Format signature for Safe
-      const webauthnSignature = SafeAccount.createWebAuthnSignature(
-        webauthnSignatureData
+      const result = await WebAuthnService.signMessage(
+        message,
+        device.credentialID,
+        user.safeAccount,
+        RPC_URL
       );
 
-      setSignature(webauthnSignature);
-
-      // Verify the signature
-      const isSignatureValid =
-        await SafeAccount.verifyWebAuthnSignatureForMessageHash(
-          RPC_URL,
-          user.safeAccount.owners[0],
-          messageHash,
-          webauthnSignature,
-          {
-            eip7212WebAuthnPrecompileVerifier:
-              user.safeAccount.eip7212WebAuthnPrecompileVerifierForSharedSigner,
-          }
-        );
-
-      setIsValid(isSignatureValid);
+      setSignature(result.signature);
+      setIsValid(result.isValid ?? false);
     } catch (error) {
       console.error("Sign message error:", error);
       setError(
@@ -266,7 +226,12 @@ function CreateTransactionButton({ user }: { user: User }) {
 
       // Create Safe account instance
       const safeAccount = SafeAccount.initializeNewAccount(
-        user.safeAccount.owners,
+        [
+          {
+            x: BigInt(user.safeAccount.owners[0].x),
+            y: BigInt(user.safeAccount.owners[0].y),
+          },
+        ],
         {
           eip7212WebAuthnPrecompileVerifierForSharedSigner:
             user.safeAccount.eip7212WebAuthnPrecompileVerifierForSharedSigner,
@@ -286,7 +251,12 @@ function CreateTransactionButton({ user }: { user: User }) {
         RPC_URL,
         BUNDLER_URL,
         {
-          expectedSigners: [user.safeAccount.owners[0]],
+          expectedSigners: [
+            {
+              x: BigInt(user.safeAccount.owners[0].x),
+              y: BigInt(user.safeAccount.owners[0].y),
+            },
+          ],
         }
       );
 
@@ -342,7 +312,10 @@ function CreateTransactionButton({ user }: { user: User }) {
         webauthnSignatureData
       );
       const signerSignaturePair: SignerSignaturePair = {
-        signer: user.safeAccount.owners[0],
+        signer: {
+          x: BigInt(user.safeAccount.owners[0].x),
+          y: BigInt(user.safeAccount.owners[0].y),
+        },
         signature: webauthnSignature,
       };
 
@@ -419,28 +392,11 @@ function CreateTransactionButton({ user }: { user: User }) {
   );
 }
 
-interface User {
-  username: string;
-  email: string;
-  devices: Array<{
-    credentialID: string;
-    transports: string[];
-  }>;
-  safeAccount?: {
-    address: string;
-    owners: Array<{
-      x: bigint;
-      y: bigint;
-    }>;
-    eip7212WebAuthnPrecompileVerifierForSharedSigner: string;
-  };
-}
-
 interface PasskeysDashboardProps {
-  users: User[];
+  user: User;
 }
 
-export function PasskeysDashboard({ users }: PasskeysDashboardProps) {
+export function PasskeysDashboard({ user }: PasskeysDashboardProps) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
       <div className="container mx-auto px-4 py-12">
@@ -458,41 +414,41 @@ export function PasskeysDashboard({ users }: PasskeysDashboardProps) {
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-semibold mb-4">Registered Users</h2>
             <div className="space-y-4">
-              {users.map((user) => (
-                <div key={user.username} className="border rounded-lg p-4">
-                  <h3 className="font-medium">{user.username}</h3>
-                  <p className="text-gray-600">{user.email}</p>
+              <div className="border rounded-lg p-4">
+                <h3 className="font-medium">{user.username}</h3>
+                <p className="text-gray-600">{user.email}</p>
 
-                  {user.safeAccount && (
-                    <div className="mt-4">
-                      <h4 className="text-sm font-medium text-gray-700">
-                        Safe Account
-                      </h4>
-                      <p className="text-sm text-gray-600 break-all">
-                        Address: {user.safeAccount.address}
-                      </p>
-                    </div>
-                  )}
-
+                {user.safeAccount && (
                   <div className="mt-4">
                     <h4 className="text-sm font-medium text-gray-700">
-                      Registered Devices:
+                      Safe Account
                     </h4>
-                    <ul className="list-disc list-inside text-sm text-gray-600">
-                      {user.devices.map((device, index) => (
-                        <li key={index}>
-                          ID: {device.credentialID}
-                          <br />
-                          Transports: {device.transports.join(", ")}
-                        </li>
-                      ))}
-                    </ul>
+                    <p className="text-sm text-gray-600 break-all">
+                      Address: {user.safeAccount.address}
+                    </p>
                   </div>
+                )}
 
-                  <SignMessageButton user={user} />
-                  <CreateTransactionButton user={user} />
+                <div className="mt-4">
+                  <h4 className="text-sm font-medium text-gray-700">
+                    Registered Devices:
+                  </h4>
+                  <ul className="list-disc list-inside text-sm text-gray-600">
+                    {user.devices.map((device, index) => (
+                      <li key={index}>
+                        ID: {device.credentialID}
+                        <br />
+                        Transports: {device.transports.join(", ")}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              ))}
+
+                <SignMessageButton user={user} />
+                <CreateTransactionButton user={user} />
+                <AddPasskeyOwnerButton user={user} />
+                <ListOwnersButton user={user} />
+              </div>
             </div>
           </div>
         </div>

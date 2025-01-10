@@ -11,11 +11,12 @@ import { signAndSendUserOp } from "../safe";
 import { storage, STORAGE_KEYS } from "../storage";
 
 // Environment constants
-const CHAIN_ID = BigInt(process.env.NEXT_PUBLIC_CHAIN_ID || "11155111");
+const CHAIN_ID = BigInt(process.env.NEXT_PUBLIC_CHAIN_ID || "84532");
 const BUNDLER_URL = process.env.NEXT_PUBLIC_BUNDLER_URL || "";
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "";
 const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL || "";
-const SPONSORSHIP_POLICY_ID = "d4924faaa8ebec13";
+const SPONSORSHIP_POLICY_ID =
+  process.env.NEXT_PUBLIC_SPONSORSHIP_POLICY_ID || "";
 
 interface TransactionParams {
   to?: string;
