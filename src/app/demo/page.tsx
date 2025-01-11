@@ -1,327 +1,128 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React from "react";
 import {
   createWebAuthnCredential,
-  P256Credential,
   toWebAuthnAccount,
-  type WebAuthnAccount,
+  entryPoint07Address,
+  createPaymasterClient,
 } from "viem/account-abstraction";
+import { createHash } from "crypto";
+import { getWebAuthnValidator } from "@rhinestone/module-sdk";
+import { extractPasskeyData } from "@safe-global/protocol-kit";
+import { getAccountNonce } from "permissionless/actions";
+import { pad } from "viem/utils";
+import { toSafeSmartAccount } from "permissionless/accounts";
 import {
-  slice,
-  createPublicClient,
-  http,
-  toBytes,
-  fromBytes,
-  parseEther,
-} from "viem";
-import {
-  MetaTransaction,
-  SafeAccountV0_3_0 as SafeAccount,
-  WebauthnPublicKey,
-  WebauthnSignatureData,
-  SignerSignaturePair,
-  CandidePaymaster,
-  Bundler,
-  GasOption,
-} from "abstractionkit";
-import {
-  candidePaymasterUrl,
-  candideBundlerUrl,
-  jsonRpcUrl,
-  candideSponsorshipPolicyId,
-} from "../config/clients";
-import { sepolia } from "viem/chains";
-import {
-  AuthenticatorAssertionResponse,
-  extractClientDataFields,
-  extractPublicKey,
-  extractSignature,
-  UserVerificationRequirement,
-  WebAuthnCredentials,
-} from "./webauthn";
-import { ethers } from "ethers";
+  RHINESTONE_ATTESTER_ADDRESS,
+  MOCK_ATTESTER_ADDRESS,
+} from "@rhinestone/module-sdk";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { createPublicClient, http } from "viem";
+import { erc7579Actions } from "permissionless/actions/erc7579";
+import { baseSepolia } from "viem/chains";
+import { createPimlicoClient } from "permissionless/clients/pimlico";
+import { createSmartAccountClient, toOwner } from "permissionless";
+import { convertCredential } from "./utils/webauthn";
 
-type PasskeyCredential = {
-  id: "string";
-  rawId: ArrayBuffer;
-  response: {
-    clientDataJSON: ArrayBuffer;
-    attestationObject: ArrayBuffer;
-    getPublicKey(): ArrayBuffer;
-  };
-  type: "public-key";
-};
+const SAFE_4337_MODULE_ADDRESS = "0x7579EE8307284F293B1927136486880611F20002";
+const SAFE_7579_LAUNCHPAD_ADDRESS =
+  "0x7579011aB74c46090561ea277Ba79D510c6C00ff";
+const SAFE_VERSION = "1.4.1";
+const ENTRY_POINT_VERSION = "0.7";
 
-type PasskeyCredentialWithPubkeyCoordinates = PasskeyCredential & {
-  pubkeyCoordinates: {
-    x: bigint;
-    y: bigint;
-  };
-};
+const publicClient = createPublicClient({
+  chain: baseSepolia,
+  transport: http(),
+});
 
-export default function PasskeysDemo() {
-  const [credential, setCredential] = useState<any | null>(null);
-  const [safeAccount, setSafeAccount] = useState<SafeAccount | null>(null);
-  const [webauthnPublicKey, setWebauthnPublicKey] =
-    useState<WebauthnPublicKey | null>(null);
-  const [webauthnAccount, setWebauthnAccount] =
-    useState<WebAuthnAccount | null>(null);
+const bundlerUrl = `https://api.pimlico.io/v2/${baseSepolia.id}/rpc?apikey=${process.env.NEXT_PUBLIC_PIMLICO_API_KEY}`;
+const pimlicoClient = createPimlicoClient({
+  transport: http(bundlerUrl),
+  entryPoint: {
+    address: entryPoint07Address,
+    version: ENTRY_POINT_VERSION,
+  },
+});
 
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("credential");
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
-      // Ensure we have all required fields
-      if (!parsed.id || !parsed.publicKey || !parsed.raw) return;
-      setCredential(parsed);
-    } catch (e) {
-      console.error("Error loading credential from localStorage:", e);
-    }
-  }, []);
+const paymasterUrl = `https://api.pimlico.io/v2/${baseSepolia.id}/rpc?apikey=${process.env.NEXT_PUBLIC_PIMLICO_API_KEY}`;
+const paymasterClient = createPaymasterClient({
+  transport: http(paymasterUrl),
+});
 
-  const createPasskey =
-    async (): Promise<PasskeyCredentialWithPubkeyCoordinates> => {
-      // Generate a passkey credential using WebAuthn API
-      const passkeyCredential = (await navigator.credentials.create({
-        publicKey: {
-          pubKeyCredParams: [
-            {
-              alg: -7,
-              type: "public-key",
-            },
-          ],
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rp: {
-            id: "localhost",
-            name: "Safe Wallet",
-          },
-          user: {
-            displayName: "Safe Owner",
-            id: crypto.getRandomValues(new Uint8Array(32)),
-            name: "safe-owner",
-          },
-          attestation: "none",
+export default function Home() {
+  const handleClick = async () => {
+    const saltUUID = createHash("sha256").update("salt").digest("hex");
+    const credential = await createWebAuthnCredential({
+      rp: {
+        name: "backpack",
+        id: "backpack-test",
+      },
+      user: {
+        id: new TextEncoder().encode(saltUUID),
+        name: "backpack user wallet",
+        displayName: "backpack user wallet",
+      },
+    });
+    console.log("credential: ", credential);
+
+    const webauthn = getWebAuthnValidator(convertCredential(credential));
+    console.log("webauthn: ", webauthn);
+
+    const owner = toWebAuthnAccount({ credential });
+
+    const safeAccount = await toSafeSmartAccount({
+      client: publicClient,
+      owners: [owner], // webauthn account is not supported
+      version: SAFE_VERSION,
+      entryPoint: {
+        address: entryPoint07Address,
+        version: ENTRY_POINT_VERSION,
+      },
+      safe4337ModuleAddress: SAFE_4337_MODULE_ADDRESS,
+      erc7579LaunchpadAddress: SAFE_7579_LAUNCHPAD_ADDRESS,
+      attesters: [
+        RHINESTONE_ATTESTER_ADDRESS, // Rhinestone Attester
+        MOCK_ATTESTER_ADDRESS, // Mock Attester - do not use in production
+      ],
+      attestersThreshold: 1,
+    });
+
+    const smartAccountClient = createSmartAccountClient({
+      account: safeAccount,
+      chain: baseSepolia,
+      bundlerTransport: http(bundlerUrl),
+      paymaster: paymasterClient,
+      userOperation: {
+        estimateFeesPerGas: async () => {
+          return (await pimlicoClient.getUserOperationGasPrice()).fast;
         },
-      })) as PasskeyCredential | null;
+      },
+    }).extend(erc7579Actions());
 
-      if (!passkeyCredential) {
-        throw new Error(
-          "Failed to generate passkey. Received null as a credential"
-        );
-      }
+    const opHash = await smartAccountClient.installModule({
+      type: webauthn.type,
+      address: webauthn.module,
+      context: webauthn.initData!,
+    });
+    console.log("opHash: ", opHash);
 
-      // Import the public key to later export it to get the XY coordinates
-      const key = await crypto.subtle.importKey(
-        "spki",
-        passkeyCredential.response.getPublicKey(),
-        {
-          name: "ECDSA",
-          namedCurve: "P-256",
-          hash: { name: "SHA-256" },
-        },
-        true, // boolean that marks the key as an exportable one
-        ["verify"]
-      );
-
-      // Export the public key in JWK format and extract XY coordinates
-      const exportedKeyWithXYCoordinates = await crypto.subtle.exportKey(
-        "jwk",
-        key
-      );
-      if (!exportedKeyWithXYCoordinates.x || !exportedKeyWithXYCoordinates.y) {
-        throw new Error("Failed to retrieve x and y coordinates");
-      }
-
-      // Create a PasskeyCredentialWithPubkeyCoordinates object
-      const passkeyWithCoordinates: PasskeyCredentialWithPubkeyCoordinates =
-        Object.assign(passkeyCredential, {
-          pubkeyCoordinates: {
-            x: BigInt(
-              "0x" +
-                Buffer.from(exportedKeyWithXYCoordinates.x, "base64").toString(
-                  "hex"
-                )
-            ),
-            y: BigInt(
-              "0x" +
-                Buffer.from(exportedKeyWithXYCoordinates.y, "base64").toString(
-                  "hex"
-                )
-            ),
-          },
-        });
-
-      return passkeyWithCoordinates;
-    };
-
-  const createSafeAccount = async () => {
-    if (!credential) return;
-
-    try {
-      const publicKey = extractPublicKey(credential.response);
-
-      const webauthnPubKey: WebauthnPublicKey = {
-        x: publicKey.x,
-        y: publicKey.y,
-      };
-      setWebauthnPublicKey(webauthnPubKey);
-
-      // Initialize Safe account with WebAuthn public key
-      const safeAccount = SafeAccount.initializeNewAccount([webauthnPubKey]);
-      setSafeAccount(safeAccount);
-      console.log("Safe Account created:", safeAccount.accountAddress);
-    } catch (error) {
-      console.error("Error creating Safe account:", error);
-    }
-  };
-
-  const signWithPasskey = async () => {
-    if (!safeAccount || !webauthnPublicKey || !credential) return;
-    try {
-      // Create a simple transaction (sending 0.00001 ETH to self as example)
-      const transaction: MetaTransaction = {
-        to: safeAccount.accountAddress,
-        value: parseEther("0"),
-        data: "0x",
-      };
-
-      // Create UserOperation with sponsored gas values and initialization parameters
-      const userOperation = await safeAccount.createUserOperation(
-        [transaction],
-        jsonRpcUrl,
-        candideBundlerUrl,
-        {
-          expectedSigners: [webauthnPublicKey],
-        }
-      );
-
-      console.log("UserOperation created:", userOperation);
-
-      // const [preVerificationGas, verificationGasLimit, callGasLimit] =
-      //   await safeAccount.estimateUserOperationGas(
-      //     userOperation,
-      //     candideBundlerUrl
-      //   );
-
-      // console.log("PreVerificationGas:", preVerificationGas);
-      // console.log("VerificationGasLimit:", verificationGasLimit);
-      // console.log("CallGasLimit:", callGasLimit);
-
-      // userOperation.callGasLimit = callGasLimit;
-      // userOperation.verificationGasLimit = verificationGasLimit;
-      // userOperation.preVerificationGas = preVerificationGas + BigInt(10000);
-
-      // // Add paymaster sponsorship
-      // const paymaster = new CandidePaymaster(candidePaymasterUrl);
-      // const [sponsoredUserOp, sponsorMetadata] =
-      //   await paymaster.createSponsorPaymasterUserOperation(
-      //     userOperation,
-      //     candideBundlerUrl,
-      //     candideSponsorshipPolicyId
-      //   );
-
-      // console.log("Sponsored UserOp:", sponsoredUserOp);
-      // console.log("Sponsor Metadata:", sponsorMetadata);
-
-      // Get the UserOp hash for signing
-      const bundler: Bundler = new Bundler(candideBundlerUrl);
-      const chainId = await bundler.chainId();
-      const safeInitOpHash = SafeAccount.getUserOperationEip712Hash(
-        userOperation,
-        BigInt(chainId)
-      );
-
-      console.log("Safe Init UserOp Hash for signing:", safeInitOpHash);
-
-      // Get WebAuthn signature using the account we created
-      const assertion = navigator.credentials.get({
-        publicKey: {
-          challenge: toBytes(safeInitOpHash),
-          rpId: window.location.hostname,
-          allowCredentials: [
-            { type: "public-key", id: new Uint8Array(credential.rawId) },
-          ],
-          userVerification: UserVerificationRequirement.required,
-        },
-      });
-
-      const response = assertion.response as AuthenticatorAssertionResponse;
-
-      const webauthnSignatureData: WebauthnSignatureData = {
-        authenticatorData: response.authenticatorData,
-        clientDataFields: extractClientDataFields(response),
-        rs: extractSignature(response),
-      };
-      // Create the WebAuthn signature in the format Safe expects
-      const webauthnSignature = SafeAccount.createWebAuthnSignature(
-        webauthnSignatureData
-      );
-
-      const signerSignaturePair: SignerSignaturePair = {
-        signer: webauthnPublicKey,
-        signature: webauthnSignature,
-      };
-
-      // Set the signature on the sponsored user operation
-      userOperation.signature =
-        SafeAccount.formatSignaturesToUseroperationSignature(
-          [signerSignaturePair],
-          {
-            isInit: userOperation.nonce === BigInt(0),
-          }
-        );
-
-      // Send the sponsored UserOperation
-      const txResponse = await safeAccount.sendUserOperation(
-        userOperation,
-        candideBundlerUrl
-      );
-      console.log("UserOperation sent:", txResponse);
-
-      // Wait for inclusion
-      const receipt = await txResponse.included();
-      console.log("Transaction included:", receipt);
-    } catch (error) {
-      console.error("Error signing with passkey:", error);
-      throw error;
-    }
+    await pimlicoClient.waitForUserOperationReceipt({
+      hash: opHash,
+    });
   };
 
   return (
-    <div>
-      {credential && (
-        <>
-          <p>Credential: {credential.id}</p>
-          <p>
-            Public Key: {`${webauthnPublicKey?.x} + ${webauthnPublicKey?.y}`}
-          </p>
-        </>
-      )}
-      {safeAccount && <p>Safe Account: {safeAccount.accountAddress}</p>}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-          marginTop: "10px",
-          width: "20%",
-        }}
-      >
-        {credential ? (
-          <>
-            <button onClick={createSafeAccount}>Create Safe Account</button>
-            <button onClick={signWithPasskey} disabled={!safeAccount}>
-              Sign with Passkey
-            </button>
-          </>
-        ) : (
-          <button type="button" onClick={createPasskey}>
-            Create credential
-          </button>
-        )}
-      </div>
+    <div className="min-h-screen bg-white">
+      <main className="container mx-auto px-4 py-8">
+        <div className="flex flex-col items-center justify-center">
+          <h1 className="text-3xl font-bold mb-8">Demo Page</h1>
+          <div className="w-full max-w-4xl bg-gray-50 rounded-lg shadow-lg p-8">
+            {/* Your content will go here */}
+            <button onClick={handleClick}>Click me</button>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
